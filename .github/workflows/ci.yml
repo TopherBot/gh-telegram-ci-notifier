@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@a9b0c1d2e3f4g5h6i7j8k9l0m1n2o3p4q5r6s7t8 # v4.1.7
+
+      - name: Set up Python
+        uses: actions/setup-python@e5b6174b5cddf0e7f814c2b77a536e9dc90a8392 # v5.2.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run flake8
+        run: flake8 .
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@a9b0c1d2e3f4g5h6i7j8k9l0m1n2o3p4q5r6s7t8 # v4.1.7
+
+      - uses: actions/setup-python@e5b6174b5cddf0e7f814c2b77a536e9dc90a8392 # v5.2.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pytest
+        run: pytest -q
+
+  notify:
+    name: Telegram Notification
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: always()
+    steps:
+      - name: Determine status
+        id: status
+        run: |
+          if [ "${{ needs.test.result }}" = "success" ]; then
+            echo "status=✅ Success" >> $GITHUB_OUTPUT
+          else
+            echo "status=❌ Failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Telegram message
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPO: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+          REF: ${{ github.ref_name }}
+          STATUS: ${{ steps.status.outputs.status }}
+        run: |
+          MESSAGE="*${{ env.STATUS }}* in *${{ env.REPO }}* on *${{ env.REF }}* (${{ env.COMMIT }})"
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d chat_id="${CHAT_ID}" \
+            -d parse_mode="Markdown" \
+            -d text="${MESSAGE}"
